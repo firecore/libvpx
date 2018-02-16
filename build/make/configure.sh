@@ -750,8 +750,17 @@ process_common_toolchain() {
   # platforms, so use the newest one available.
   case ${toolchain} in
     arm*-darwin*)
-      add_cflags "-miphoneos-version-min=${IOS_VERSION_MIN}"
-      iphoneos_sdk_dir="$(show_darwin_sdk_path iphoneos)"
+      ios_platform="iphoneos"
+      ios_min_version_parameter="-miphoneos-version-min"
+      case "$extra_cflags" in
+        *AppleTVOS*|*mtvos-version-min*)
+        ios_platform="appletvos"
+        ios_min_version_parameter="-mtvos-version-min"
+        IOS_VERSION_MIN="9.0" #Min version of tvos
+      ;;
+      esac
+      add_cflags "$ios_min_version_parameter=${IOS_VERSION_MIN}"
+      iphoneos_sdk_dir="$(show_darwin_sdk_path $ios_platform)"
       if [ -d "${iphoneos_sdk_dir}" ]; then
         add_cflags  "-isysroot ${iphoneos_sdk_dir}"
         add_ldflags "-isysroot ${iphoneos_sdk_dir}"
@@ -804,6 +813,16 @@ process_common_toolchain() {
         add_ldflags "-isysroot ${iossim_sdk_dir}"
       fi
       ;;
+    *-appletvsimulator-*)
+        IOS_VERSION_MIN="9.0"
+        add_cflags  "-mtvos-simulator-version-min=${IOS_VERSION_MIN}"
+        add_ldflags "-mtvos-simulator-version-min=${IOS_VERSION_MIN}"
+        iossim_sdk_dir="$(show_darwin_sdk_path appletvsimulator)"
+        if [ -d "${iossim_sdk_dir}" ]; then
+            add_cflags  "-isysroot ${iossim_sdk_dir}"
+            add_ldflags "-isysroot ${iossim_sdk_dir}"
+        fi
+        ;;
   esac
 
   # Handle Solaris variants. Solaris 10 needs -lposix4
@@ -997,7 +1016,15 @@ EOF
           ;;
 
         darwin*)
-          XCRUN_FIND="xcrun --sdk iphoneos --find"
+          ios_platform="iphoneos"
+          ios_min_version_parameter="-miphoneos-version-min"
+          case "$extra_cflags" in
+            *AppleTVOS*|*mtvos-version-min*)
+            ios_platform="appletvos"
+            ios_min_version_parameter="-mtvos-version-min"
+          ;;
+          esac
+          XCRUN_FIND="xcrun --sdk $ios_platform --find"
           CXX="$(${XCRUN_FIND} clang++)"
           CC="$(${XCRUN_FIND} clang)"
           AR="$(${XCRUN_FIND} ar)"
@@ -1027,13 +1054,13 @@ EOF
           add_cflags -arch ${tgt_isa}
           add_ldflags -arch ${tgt_isa}
 
-          alt_libc="$(show_darwin_sdk_path iphoneos)"
+          alt_libc="$(show_darwin_sdk_path $ios_platform)"
           if [ -d "${alt_libc}" ]; then
             add_cflags -isysroot ${alt_libc}
           fi
 
           if [ "${LD}" = "${CXX}" ]; then
-            add_ldflags -miphoneos-version-min="${IOS_VERSION_MIN}"
+            add_ldflags "$ios_min_version_parameter=${IOS_VERSION_MIN}"
           else
             add_ldflags -ios_version_min "${IOS_VERSION_MIN}"
           fi
@@ -1268,6 +1295,19 @@ EOF
             log "Warning: Bitcode embed disabled for simulator targets."
           fi
           ;;
+        appletvsimulator)
+            add_asflags -f macho${bits}
+            enabled x86 && sim_arch="-arch i386" || sim_arch="-arch x86_64"
+            add_cflags  ${sim_arch}
+            add_ldflags ${sim_arch}
+
+            if [ "$(show_darwin_sdk_major_version appletvsimulator)" -gt 8 ]; then
+            # yasm v1.3.0 doesn't know what -fembed-bitcode means, so turning it
+            # on is pointless (unless building a C-only lib). Warn the user, but
+            # do nothing here.
+            log "Warning: Bitcode embed disabled for simulator targets."
+            fi
+            ;;
         os2)
           add_asflags -f aout
           enabled debug && add_asflags -g
@@ -1379,6 +1419,12 @@ EOF
   if enabled linux; then
     add_cflags -D_LARGEFILE_SOURCE
     add_cflags -D_FILE_OFFSET_BITS=64
+  fi
+
+  # append any user defined extra cflags
+  if [ -n "${extra_cflags}" ] ; then
+    check_add_cflags ${extra_cflags} || \
+    die "Requested extra CFLAGS '${extra_cflags}' not supported by compiler"
   fi
 }
 
